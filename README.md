@@ -1,2 +1,4 @@
-# effector-effects-expirements
-Created with CodeSandbox
+# About
+
+Example of Jest with babel7
+

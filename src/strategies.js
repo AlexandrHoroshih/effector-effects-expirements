@@ -1,0 +1,9 @@
+const S = {
+  TAKE_ALL: "TAKE_ALL",
+  TAKE_LAST: "TAKE_LAST",
+  TAKE_FIRST: "TAKE_FIRST",
+  QUEUE: "QUEUE",
+  RACE: "RACE"
+};
+
+export const { TAKE_ALL, TAKE_LAST, TAKE_FIRST, QUEUE, RACE } = S;
