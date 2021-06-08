@@ -55,15 +55,15 @@ export const createFx = ({
 
     handler(params, onCancel)
       .then((r) => {
-        updateDefers((defers) => defers.filter((d) => d !== def));
         def.rs(r);
       })
       .catch((e) => {
-        updateDefers((defers) => defers.filter((d) => d !== def));
         def.rj(e);
       });
 
     const result = await runDeferFx(def);
+
+    updateDefers((defers) => defers.filter((d) => d !== def));
 
     return result;
   };
