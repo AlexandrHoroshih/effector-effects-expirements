@@ -1,4 +1,12 @@
-import { createDomain, createEvent, attach, combine, sample } from "effector";
+import {
+  createDomain,
+  createEvent,
+  createStore,
+  attach,
+  combine,
+  sample,
+  createEffect,
+} from "effector";
 import { TAKE_ALL } from "./strategies";
 import { createDefer } from "./defer";
 
@@ -6,13 +14,12 @@ const rootDomain = createDomain();
 
 const noop = () => {};
 
-const wrap = (fn) => {
-  const wrapped = async (...args) => await fn(...args);
-
-  return wrapped;
+const removeItem = (target, item) => {
+  const idx = target.findIndex((f) => f === item);
+  target.splice(idx, 1);
 };
 
-const withFn = (prev, next) => {
+const universalReducer = (prev, next) => {
   if (typeof next !== "function") {
     return next;
   }
@@ -24,53 +31,39 @@ export const createFx = ({
   handler,
   stopSignal = createEvent(),
   domain = rootDomain,
-  strategy = TAKE_ALL
+  strategy = TAKE_ALL,
 }) => {
+  const runDeferFx = domain.createEffect(async (def) => await def.req);
   const updateDefers = domain.createEvent();
-  const $defers = domain.createStore([]).on(updateDefers, withFn);
-
-  const updateCancellers = domain.createEvent();
-  const $cancellers = domain.createStore([]).on(updateCancellers, withFn);
-  const onCancel = (fn) => {
-    const withCleanup = () => {
-      fn();
-
-      updateCancellers((cls) => cls.filter((c) => c !== withCleanup));
-    };
-
-    updateCancellers((cls) => [...cls, withCleanup]);
-  };
-
-  const $state = combine({ defers: $defers, cancellers: $cancellers });
+  const defers = domain.createStore([]).on(updateDefers, universalReducer);
 
   sample({
-    source: $state,
-    clock: stopSignal
-  }).watch(({ cancellers, defers }) => {
-    cancellers.forEach((clean) => clean());
-    updateCancellers([]);
-    defers.forEach((def) => def.rj("Cancelled!"));
+    source: defers,
+    clock: stopSignal,
+  }).watch((defs) => {
+    defs.forEach((d) => d.rj("Cancelled"));
     updateDefers([]);
   });
 
   const patchedHandler = async (params) => {
-    const scopedDef = updateDefers;
+    let cancel = { handler: noop };
+    const onCancel = (fn) => {
+      cancel.handler = fn;
+    };
+    const def = createDefer(cancel);
+    updateDefers((defers) => [...defers, def]);
 
-    const def = createDefer();
-    scopedDef((defers) => [...defers, def]);
-
-    wrap(handler)(params, onCancel)
+    handler(params, onCancel)
       .then((r) => {
-        console.log(r);
+        updateDefers((defers) => defers.filter((d) => d !== def));
         def.rs(r);
-        scopedDef((defers) => defers.filter((d) => d !== def));
       })
       .catch((e) => {
+        updateDefers((defers) => defers.filter((d) => d !== def));
         def.rj(e);
-        scopedDef((defers) => defers.filter((d) => d !== def));
       });
 
-    const result = await def.req;
+    const result = await runDeferFx(def);
 
     return result;
   };
