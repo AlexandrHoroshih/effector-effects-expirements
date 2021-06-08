@@ -280,7 +280,7 @@ test("forks do not affect each other", async () => {
 });
 
 test("take last", async () => {
-  let i = 0;
+  const whenCancelled = jest.fn();
 
   const d = createDomain();
   const $results = d.createStore([]);
@@ -289,24 +289,27 @@ test("take last", async () => {
     domain: d,
     strategy: TAKE_LAST,
     handler: async (timeout = 300, onCancel) => {
-      i = i + 1;
-      const result = await wait({ value: i, timeout });
+      onCancel(() => whenCancelled());
+
+      const result = await wait({ value: timeout, timeout });
 
       return result;
     },
   });
 
-  forward({
-    from: run,
-    to: [someFx, someFx.prepend(() => 600), someFx.prepend(() => 900)],
+  run.watch((x) => {
+    const scoped = scopeBind(someFx);
+
+    scoped(x);
+    scoped(x * 2);
+    scoped(x * 3);
   });
 
   $results.on(someFx.doneData, (arr, r) => [...arr, r]);
 
   const scope = fork(d);
 
-  // setTimeout(stop, 400)
-  await allSettled(run, { scope, params: 300 });
+  await allSettled(run, { scope, params: 100 });
 
-  expect(scope.getState($results)).toEqual([3]);
+  expect(whenCancelled.mock.calls.length).toEqual(2);
 });

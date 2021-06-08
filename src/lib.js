@@ -5,9 +5,10 @@ import {
   attach,
   combine,
   sample,
+  is,
   createEffect,
 } from "effector";
-import { TAKE_ALL } from "./strategies";
+import { TAKE_ALL, TAKE_LAST, TAKE_FIRST, RACE } from "./strategies";
 import { createDefer } from "./defer";
 import { CancelledError } from "./error";
 
@@ -36,6 +37,9 @@ export const createFx = ({
 }) => {
   const runDeferFx = domain.createEffect(async (def) => await def.req);
   const updateDefers = domain.createEvent();
+  const currentStrategy = is.store(strategy)
+    ? strategy
+    : domain.createStore(strategy);
   const defers = domain.createStore([]).on(updateDefers, universalReducer);
 
   sample({
@@ -46,7 +50,16 @@ export const createFx = ({
     updateDefers([]);
   });
 
-  const patchedHandler = async (params) => {
+  const patchedHandler = async ({ params, defs, strat }) => {
+    if (strat === TAKE_FIRST && defs.length === 1) {
+      throw new CancelledError(TAKE_FIRST);
+    }
+
+    if (strat === TAKE_LAST && defs.length > 0) {
+      defs.forEach((d) => d.rj(new CancelledError(TAKE_LAST)));
+      updateDefers([]);
+    }
+
     let cancel = { handler: noop };
     const onCancel = (fn) => {
       cancel.handler = fn;
@@ -57,6 +70,10 @@ export const createFx = ({
     handler(params, onCancel)
       .then((r) => {
         def.rs(r);
+
+        if (strat === RACE && defs.length > 1) {
+          defs.forEach((d) => d !== def && d.rj(new CancelledError(RACE)));
+        }
       })
       .catch((e) => {
         def.rj(e);
@@ -69,7 +86,15 @@ export const createFx = ({
     return result;
   };
 
-  const fx = domain.createEffect(patchedHandler);
+  const fx = attach({
+    effect: domain.createEffect(patchedHandler),
+    source: combine([defers, currentStrategy]),
+    mapParams: (params, [defs, strat]) => ({
+      params,
+      defs,
+      strat,
+    }),
+  });
 
   return fx;
 };
