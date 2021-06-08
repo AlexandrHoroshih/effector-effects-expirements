@@ -234,6 +234,8 @@ test("can cancel all pending effects", async () => {
 });
 
 test("forks do not affect each other", async () => {
+  const whenCancelled = jest.fn();
+
   const d = createDomain();
   const $results = d.createStore([]);
   const stop = d.createEvent();
@@ -242,15 +244,20 @@ test("forks do not affect each other", async () => {
     domain: d,
     stopSignal: stop,
     handler: async (timeout = 300, onCancel) => {
-      const result = await wait({ value: 1, timeout });
+      onCancel(() => whenCancelled());
+
+      const result = await wait({ value: timeout, timeout });
 
       return result;
     },
   });
 
-  forward({
-    from: run,
-    to: [someFx, someFx.prepend((x) => x * 2), someFx.prepend((x) => x * 3)],
+  run.watch((x) => {
+    const scoped = scopeBind(someFx);
+
+    scoped(x);
+    scoped(x * 2);
+    scoped(x * 3);
   });
 
   run.watch((t) => {
@@ -267,7 +274,9 @@ test("forks do not affect each other", async () => {
   await allSettled(run, { scope: scopeA, params: 100 });
   await allSettled(run, { scope: scopeB, params: 300 });
 
-  expect(scopeA.getState($results)).toEqual(scopeB.getState($results));
+  expect(scopeA.getState($results)).toEqual([100]);
+  expect(scopeB.getState($results)).toEqual([300]);
+  expect(whenCancelled.mock.calls.length).toEqual(4);
 });
 
 test("take last", async () => {

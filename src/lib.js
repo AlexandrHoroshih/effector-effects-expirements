@@ -9,6 +9,7 @@ import {
 } from "effector";
 import { TAKE_ALL } from "./strategies";
 import { createDefer } from "./defer";
+import { CancelledError } from "./error";
 
 const rootDomain = createDomain();
 
@@ -41,7 +42,7 @@ export const createFx = ({
     source: defers,
     clock: stopSignal,
   }).watch((defs) => {
-    defs.forEach((d) => d.rj("Cancelled"));
+    defs.forEach((d) => d.rj(new CancelledError("")));
     updateDefers([]);
   });
 
