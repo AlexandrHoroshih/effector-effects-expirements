@@ -1,12 +1,10 @@
 import {
   createDomain,
   createEvent,
-  createStore,
   attach,
   combine,
   sample,
   is,
-  createEffect,
 } from "effector";
 import { TAKE_ALL, TAKE_LAST, TAKE_FIRST, RACE } from "./strategies";
 import { createDefer } from "./defer";
@@ -15,11 +13,6 @@ import { CancelledError } from "./error";
 const rootDomain = createDomain();
 
 const noop = () => {};
-
-const removeItem = (target, item) => {
-  const idx = target.findIndex((f) => f === item);
-  target.splice(idx, 1);
-};
 
 const universalReducer = (prev, next) => {
   if (typeof next !== "function") {

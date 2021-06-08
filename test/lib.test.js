@@ -6,9 +6,8 @@ import {
   scopeBind,
   serialize,
 } from "effector";
-import { attachLogger } from "effector-logger/attach";
 import { createFx } from "../src/lib";
-import { TAKE_LAST } from "../src/strategies";
+import { TAKE_LAST, TAKE_FIRST } from "../src/strategies";
 
 const wait = async ({ timeout = 1000, value }) =>
   await new Promise((r) => setTimeout(() => r(value), timeout));
@@ -311,5 +310,42 @@ test("take last", async () => {
 
   await allSettled(run, { scope, params: 100 });
 
+  expect(scope.getState($results)).toEqual([300]);
   expect(whenCancelled.mock.calls.length).toEqual(2);
+});
+
+test("take first", async () => {
+  const whenCancelled = jest.fn();
+
+  const d = createDomain();
+  const $results = d.createStore([]);
+  const run = d.createEvent();
+  const someFx = createFx({
+    domain: d,
+    strategy: TAKE_FIRST,
+    handler: async (timeout = 300, onCancel) => {
+      onCancel(() => whenCancelled());
+
+      const result = await wait({ value: timeout, timeout });
+
+      return result;
+    },
+  });
+
+  run.watch((x) => {
+    const scoped = scopeBind(someFx);
+
+    scoped(x);
+    scoped(x * 2);
+    scoped(x * 3);
+  });
+
+  $results.on(someFx.doneData, (arr, r) => [...arr, r]);
+
+  const scope = fork(d);
+
+  await allSettled(run, { scope, params: 100 });
+
+  expect(scope.getState($results)).toEqual([100]);
+  expect(whenCancelled.mock.calls.length).toEqual(0); // if TAKE_FIRST, then next effects shoudn't be started at all
 });
