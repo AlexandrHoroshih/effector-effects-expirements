@@ -138,7 +138,7 @@ test("scope is serializable", async () => {
   const fn = jest.fn();
 
   const d = createDomain();
-  const $results = d.createStore([]);
+  const $results = d.createStore([], { name: "$results", sid: "$results" });
   const run = d.createEvent();
   const someFx = createFx({
     domain: d,
@@ -172,7 +172,7 @@ test("scope is serializable", async () => {
   const str = JSON.stringify(serialize(scope));
 
   expect(str).toBeTruthy();
-  expect(str.length > 2).toBeTruthy();
+  expect(str.includes(`$results":[300,600,900]`)).toBeTruthy();
 });
 
 test("can cancel all pending effects", async () => {
