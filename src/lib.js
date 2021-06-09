@@ -4,10 +4,11 @@ import {
   attach,
   combine,
   sample,
+  guard,
   is,
   scopeBind,
 } from "effector";
-import { TAKE_ALL, TAKE_LAST, TAKE_FIRST, RACE } from "./strategies";
+import { TAKE_ALL, TAKE_LAST, TAKE_FIRST, RACE, QUEUE } from "./strategies";
 import { createDefer } from "./defer";
 import { CancelledError } from "./error";
 
@@ -21,6 +22,22 @@ const universalReducer = (prev, next) => {
   }
 
   return next(prev);
+};
+
+const isomorphicScopeBind = (event) => {
+  let bindEvent = event;
+
+  // a hack, because scopeBind throws, if called not in scope
+  // need to send issue to the the author about that
+  // would expect a noop for non-scope case
+  // following try-catch sort of implements this behaviour
+  try {
+    bindEvent = scopeBind(event);
+  } catch (e) {
+    bindEvent = event;
+  }
+
+  return bindEvent;
 };
 
 export const createFx = ({
@@ -37,20 +54,28 @@ export const createFx = ({
   const defers = domain.createStore([]).on(updateDefers, universalReducer);
 
   const setRun = domain.createEvent();
-
-  setRun.watch((config) => {
-    const { params, def, onCancel, strat } = config;
-    let scopedStop = stopSignal;
-
-    // a hack, because scopeBind throws, if called not in scope
-    // need to send issue to the the author about that
-    // would expect a noop for non-scope case
-    // following try-catch sort of implements this behaviour
-    try {
-      scopedStop = scopeBind(stopSignal);
-    } catch (e) {
-      scopedStop = stopSignal;
+  const queue = domain
+    .createStore([])
+    .on(setRun, (runs, param) => [...runs, param]);
+  const canRun = combine(queue, defers, currentStrategy, (q, defs, strat) => {
+    if (strat === QUEUE) {
+      return q.length > 0 && q.length === defs.length;
     }
+
+    return q.length > 0;
+  });
+
+  const readyToRun = guard({
+    source: queue,
+    clock: [queue, canRun],
+    filter: canRun,
+  }).map((q) => q[0]);
+
+  queue.on(readyToRun, (queue, param) => queue.filter((q) => q !== param));
+
+  readyToRun.watch((config) => {
+    const { params, def, onCancel, strat } = config;
+    const scopedStop = isomorphicScopeBind(stopSignal);
 
     handler(params, onCancel)
       .then((r) => {

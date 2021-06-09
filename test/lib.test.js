@@ -7,7 +7,7 @@ import {
   serialize,
 } from "effector";
 import { createFx } from "../src/lib";
-import { TAKE_LAST, TAKE_FIRST, RACE } from "../src/strategies";
+import { TAKE_LAST, TAKE_FIRST, RACE, QUEUE } from "../src/strategies";
 
 const wait = async ({ timeout = 1000, value }) =>
   await new Promise((r) => setTimeout(() => r(value), timeout));
@@ -384,4 +384,41 @@ test("race", async () => {
 
   expect(scope.getState($results)).toEqual([50]);
   expect(whenCancelled.mock.calls.length).toEqual(2);
+});
+
+test("queue", async () => {
+  const whenCancelled = jest.fn();
+
+  const d = createDomain();
+
+  const $results = d.createStore([]);
+  const run = d.createEvent();
+  const someFx = createFx({
+    domain: d,
+    strategy: QUEUE,
+    handler: async (timeout = 300, onCancel) => {
+      onCancel(() => {
+        whenCancelled();
+      });
+
+      const result = await wait({ value: timeout, timeout });
+
+      return result;
+    },
+  });
+
+  run.watch((x) => {
+    someFx(x);
+    someFx(x / 2);
+    someFx(x * 2);
+  });
+
+  $results.on(someFx.doneData, (arr, r) => [...arr, r]);
+
+  const scope = fork(d);
+
+  await allSettled(run, { scope, params: 100 });
+
+  expect(scope.getState($results)).toEqual([100, 50, 200]);
+  expect(whenCancelled.mock.calls.length).toEqual(0);
 });
