@@ -5,6 +5,7 @@ import {
   combine,
   sample,
   is,
+  scopeBind,
 } from "effector";
 import { TAKE_ALL, TAKE_LAST, TAKE_FIRST, RACE } from "./strategies";
 import { createDefer } from "./defer";
@@ -35,6 +36,32 @@ export const createFx = ({
     : domain.createStore(strategy);
   const defers = domain.createStore([]).on(updateDefers, universalReducer);
 
+  const setRun = domain.createEvent();
+
+  setRun.watch((config) => {
+    const { params, def, onCancel, strat } = config;
+    let scopedStop = stopSignal;
+
+    // a hack, because scopeBind throws, if called not in scope
+    // need to send issue to the the author about that
+    // would expect a noop for non-scope case
+    // following try-catch sort of implements this behaviour
+    try {
+      scopedStop = scopeBind(stopSignal);
+    } catch (e) {
+      scopedStop = stopSignal;
+    }
+
+    handler(params, onCancel)
+      .then((r) => {
+        def.rs(r);
+      })
+      .catch((e) => {
+        def.rj(e);
+      })
+      .finally(() => strat === RACE && scopedStop());
+  });
+
   sample({
     source: defers,
     clock: stopSignal,
@@ -60,17 +87,7 @@ export const createFx = ({
     const def = createDefer(cancel);
     updateDefers((defers) => [...defers, def]);
 
-    handler(params, onCancel)
-      .then((r) => {
-        def.rs(r);
-
-        if (strat === RACE && defs.length > 1) {
-          defs.forEach((d) => d !== def && d.rj(new CancelledError(RACE)));
-        }
-      })
-      .catch((e) => {
-        def.rj(e);
-      });
+    setRun({ params, def, onCancel, strat });
 
     const result = await runDeferFx(def);
 
