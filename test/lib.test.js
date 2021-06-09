@@ -391,6 +391,7 @@ test("queue", async () => {
 
   const d = createDomain();
 
+  const $starts = d.createStore([]);
   const $results = d.createStore([]);
   const run = d.createEvent();
   const someFx = createFx({
@@ -413,12 +414,14 @@ test("queue", async () => {
     someFx(x * 2);
   });
 
+  $starts.on(someFx, (arr, r) => [...arr, r]);
   $results.on(someFx.doneData, (arr, r) => [...arr, r]);
 
   const scope = fork(d);
 
   await allSettled(run, { scope, params: 100 });
 
+  expect(scope.getState($starts)).toEqual([100, 50, 200]);
   expect(scope.getState($results)).toEqual([100, 50, 200]);
   expect(whenCancelled.mock.calls.length).toEqual(0);
 });
