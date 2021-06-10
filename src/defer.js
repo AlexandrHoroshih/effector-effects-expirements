@@ -1,4 +1,4 @@
-import { CancelledError } from "./error";
+import { CancelledError, TimeoutError } from "./error";
 
 export const createDefer = (config) => {
   const defer = { done: false };
@@ -14,7 +14,11 @@ export const createDefer = (config) => {
     defer.rj = (...args) => {
       if (!defer.done) {
         defer.done = true;
-        if (args[0] instanceof CancelledError) {
+        if (
+          args[0] instanceof CancelledError ||
+          args[0] instanceof TimeoutError
+        ) {
+          config.cancelled(args[0]);
           config.handler(...args);
         }
 

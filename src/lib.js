@@ -1,6 +1,5 @@
 import {
   createDomain,
-  createEvent,
   attach,
   combine,
   sample,
@@ -11,7 +10,7 @@ import {
 } from "effector";
 import { TAKE_ALL, TAKE_LAST, TAKE_FIRST, RACE, QUEUE } from "./strategies";
 import { createDefer } from "./defer";
-import { CancelledError } from "./error";
+import { CancelledError, LimitExceededError, TimeoutError } from "./error";
 
 const rootDomain = createDomain();
 
@@ -45,14 +44,22 @@ export const createFx = ({
   handler,
   domain = rootDomain,
   strategy = TAKE_ALL,
+  limit = null,
+  timeout = null,
 }) => {
   const stopSignal = domain.createEvent();
   const cancel = domain.createEvent();
+
+  const cancelled = domain.createEvent();
   const runDeferFx = domain.createEffect(async (def) => await def.req);
   const updateDefers = domain.createEvent();
   const currentStrategy = is.store(strategy)
     ? strategy
     : domain.createStore(strategy);
+  const currentLimit = is.store(limit) ? limit : domain.createStore(limit);
+  const currentTimeout = is.store(timeout)
+    ? timeout
+    : domain.createStore(timeout);
   const defers = domain.createStore([]).on(updateDefers, universalReducer);
 
   const setRun = domain.createEvent();
@@ -81,7 +88,7 @@ export const createFx = ({
   queue.on(readyToRun, (queue, param) => queue.filter((q) => q !== param));
 
   readyToRun.watch((config) => {
-    const { params, def, onCancel, strat } = config;
+    const { params, def, onCancel, strat, time } = config;
     const scopedStop = isomorphicScopeBind(stopSignal);
 
     handler(params, onCancel)
@@ -92,6 +99,12 @@ export const createFx = ({
         def.rj(e);
       })
       .finally(() => strat === RACE && scopedStop());
+
+    if (time) {
+      setTimeout(() => {
+        def.rj(new TimeoutError(time));
+      }, time);
+    }
   });
 
   sample({
@@ -102,9 +115,17 @@ export const createFx = ({
     updateDefers([]);
   });
 
-  const patchedHandler = async ({ params, defs, strat }) => {
+  const patchedHandler = async ({ params, defs, strat, lim, time }) => {
+    if (lim && defs.length === lim) {
+      const error = new LimitExceededError();
+      cancelled(error);
+      throw new LimitExceededError();
+    }
+
     if (strat === TAKE_FIRST && defs.length === 1) {
-      throw new CancelledError(TAKE_FIRST);
+      const error = new CancelledError(TAKE_FIRST);
+      cancelled(error);
+      throw error;
     }
 
     if (strat === TAKE_LAST && defs.length > 0) {
@@ -112,14 +133,16 @@ export const createFx = ({
       updateDefers([]);
     }
 
-    let cancel = { handler: noop };
+    const scopedCancelled = isomorphicScopeBind(cancelled);
+
+    let cancel = { handler: noop, cancelled: scopedCancelled };
     const onCancel = (fn) => {
       cancel.handler = fn;
     };
     const def = createDefer(cancel);
     updateDefers((defers) => [...defers, def]);
 
-    setRun({ params, def, onCancel, strat });
+    setRun({ params, def, onCancel, strat, time });
 
     const result = await runDeferFx(def);
 
@@ -130,15 +153,18 @@ export const createFx = ({
 
   const fx = attach({
     effect: domain.createEffect(patchedHandler),
-    source: combine([defers, currentStrategy]),
-    mapParams: (params, [defs, strat]) => ({
+    source: combine([defers, currentStrategy, currentLimit, currentTimeout]),
+    mapParams: (params, [defs, strat, lim, time]) => ({
       params,
       defs,
       strat,
+      lim,
+      time,
     }),
   });
 
   fx.cancel = cancel;
+  fx.cancelled = cancelled;
 
   return fx;
 };

@@ -178,6 +178,7 @@ test("scope is serializable", async () => {
 test("can cancel all pending effects", async () => {
   const fn = jest.fn();
   const whenCancelled = jest.fn();
+  const cancelledEventCalled = jest.fn();
 
   const d = createDomain();
   const $results = d.createStore([]);
@@ -194,6 +195,8 @@ test("can cancel all pending effects", async () => {
       return result;
     },
   });
+
+  someFx.cancelled.watch(cancelledEventCalled);
 
   const waitFx = d.createEffect(
     async (t) => await wait({ value: t, timeout: t })
@@ -227,6 +230,9 @@ test("can cancel all pending effects", async () => {
     fn.mock.calls.map(([arg]) => arg).slice(0, 1)
   );
   expect(whenCancelled.mock.calls.length).toEqual(2);
+  expect(whenCancelled.mock.calls.length).toEqual(
+    cancelledEventCalled.mock.calls.length
+  );
 });
 
 test("forks do not affect each other", async () => {
@@ -420,4 +426,96 @@ test("queue", async () => {
   expect(scope.getState($starts)).toEqual([100, 50, 200]);
   expect(scope.getState($results)).toEqual([100, 50, 200]);
   expect(whenCancelled.mock.calls.length).toEqual(0);
+});
+
+test("limit", async () => {
+  const fn = jest.fn();
+  const whenCancelled = jest.fn();
+  const cancelledEventCalled = jest.fn();
+
+  const d = createDomain();
+  const $results = d.createStore([]);
+  const run = d.createEvent();
+  const someFx = createFx({
+    domain: d,
+    limit: 2,
+    handler: async (timeout = 300, onCancel) => {
+      fn(timeout);
+      onCancel((e) => {
+        whenCancelled();
+      });
+      const result = await wait({ value: timeout, timeout });
+
+      return result;
+    },
+  });
+
+  someFx.cancelled.watch(cancelledEventCalled);
+
+  run.watch(() => {
+    const scoped = scopeBind(someFx);
+
+    scoped(300);
+    scoped(600);
+    scoped(900);
+  });
+
+  $results.on(someFx.doneData, (arr, r) => [...arr, r]);
+
+  const scope = fork(d);
+
+  await allSettled(run, { scope, params: 300 });
+
+  expect(scope.getState($results)).toEqual(
+    fn.mock.calls.map(([arg]) => arg).slice(0, 2)
+  );
+  expect(cancelledEventCalled.mock.calls.length).toEqual(1);
+  expect(whenCancelled.mock.calls.length).toEqual(0); // calls of limit shoud not be called at all, so cleanup is not called
+});
+
+test("timeout", async () => {
+  const fn = jest.fn();
+  const whenCancelled = jest.fn();
+  const cancelledEventCalled = jest.fn();
+
+  const d = createDomain();
+  const $results = d.createStore([]);
+  const run = d.createEvent();
+  const someFx = createFx({
+    domain: d,
+    timeout: 400,
+    handler: async (timeout = 300, onCancel) => {
+      fn(timeout);
+      onCancel((e) => {
+        whenCancelled();
+      });
+      const result = await wait({ value: timeout, timeout });
+
+      return result;
+    },
+  });
+
+  someFx.cancelled.watch(cancelledEventCalled);
+
+  run.watch(() => {
+    const scoped = scopeBind(someFx);
+
+    scoped(300);
+    scoped(600);
+    scoped(900);
+  });
+
+  $results.on(someFx.doneData, (arr, r) => [...arr, r]);
+
+  const scope = fork(d);
+
+  await allSettled(run, { scope, params: 300 });
+
+  expect(scope.getState($results)).toEqual(
+    fn.mock.calls.map(([arg]) => arg).slice(0, 1)
+  );
+  expect(whenCancelled.mock.calls.length).toEqual(
+    cancelledEventCalled.mock.calls.length
+  );
+  expect(whenCancelled.mock.calls.length).toEqual(2); // when closed by timeout, cancellers shoud be called
 });
