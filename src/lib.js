@@ -6,6 +6,7 @@ import {
   sample,
   guard,
   is,
+  forward,
   scopeBind,
 } from "effector";
 import { TAKE_ALL, TAKE_LAST, TAKE_FIRST, RACE, QUEUE } from "./strategies";
@@ -42,10 +43,11 @@ const isomorphicScopeBind = (event) => {
 
 export const createFx = ({
   handler,
-  stopSignal = createEvent(),
   domain = rootDomain,
   strategy = TAKE_ALL,
 }) => {
+  const stopSignal = domain.createEvent();
+  const cancel = domain.createEvent();
   const runDeferFx = domain.createEffect(async (def) => await def.req);
   const updateDefers = domain.createEvent();
   const currentStrategy = is.store(strategy)
@@ -63,6 +65,11 @@ export const createFx = ({
     }
 
     return q.length > 0;
+  });
+
+  forward({
+    from: cancel,
+    to: stopSignal,
   });
 
   const readyToRun = guard({
@@ -130,6 +137,8 @@ export const createFx = ({
       strat,
     }),
   });
+
+  fx.cancel = cancel;
 
   return fx;
 };

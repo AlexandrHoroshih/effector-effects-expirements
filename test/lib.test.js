@@ -182,10 +182,8 @@ test("can cancel all pending effects", async () => {
   const d = createDomain();
   const $results = d.createStore([]);
   const run = d.createEvent();
-  const stop = d.createEvent();
   const someFx = createFx({
     domain: d,
-    stopSignal: stop,
     handler: async (timeout = 300, onCancel) => {
       fn(timeout);
       onCancel((e) => {
@@ -208,7 +206,7 @@ test("can cancel all pending effects", async () => {
 
   forward({
     from: waitFx.done,
-    to: stop,
+    to: someFx.cancel,
   });
 
   run.watch(() => {
@@ -236,11 +234,9 @@ test("forks do not affect each other", async () => {
 
   const d = createDomain();
   const $results = d.createStore([]);
-  const stop = d.createEvent();
   const run = d.createEvent();
   const someFx = createFx({
     domain: d,
-    stopSignal: stop,
     handler: async (timeout = 300, onCancel) => {
       onCancel(() => whenCancelled());
 
@@ -259,7 +255,7 @@ test("forks do not affect each other", async () => {
   });
 
   run.watch((t) => {
-    const scopedStop = scopeBind(stop);
+    const scopedStop = scopeBind(someFx.cancel);
 
     setTimeout(scopedStop, t * 1.5);
   });
